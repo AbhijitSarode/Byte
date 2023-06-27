@@ -6,7 +6,6 @@
 #include <ctype.h>
 #include <errno.h>
 
-
 /*** Defines ***/
 #define CTRL_KEY(k) ((k) & 0x1f) // k & 00011111. mimics CTRL + k in the terminal
 
@@ -71,8 +70,23 @@ char editorKeyRead() {
 
 /*** Output ***/
 
+// --- Draw tildes at the beginning of the line ---//
+void editorDrawRows() {
+    int y;
+    for (int y = 0; y < 24; y++) // Since size of the terminal is not known yet, therefore hardcoded 24 rows
+    {
+        write(STDOUT_FILENO, "~\r\n", 3); // \r is carriage return. \n is line feed. \r\n is a Windows line ending
+    }
+    
+}
+
+
+// --- Refresh the screen ---//
 void editorRefreshScreen() {
     write(STDOUT_FILENO, "\x1b[2J", 4); // \x1b is the escape character. [2J is the escape sequence to clear the entire screen & it takes 4 bytes to write
+    write(STDOUT_FILENO, "\x1b[H", 3); // [H is the escape sequence to position the cursor at the top-left corner of the screen & it takes 3 bytes to write
+
+    editorDrawRows(); // Draw tildes at the beginning of the line
     write(STDOUT_FILENO, "\x1b[H", 3); // [H is the escape sequence to position the cursor at the top-left corner of the screen & it takes 3 bytes to write
 }
 
@@ -89,7 +103,7 @@ void editorProcessKeypress() {
         // --- Clear screen & reposition cursor on exit ---//
         write(STDOUT_FILENO, "\x1b[2J", 4);
         write(STDOUT_FILENO, "\x1b[H", 3);
-        
+
         exit(0);
         break;
     
