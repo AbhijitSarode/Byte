@@ -5,14 +5,24 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <errno.h>
+#include <sys/ioctl.h> // Input Output Control
 
 /*** Defines ***/
 #define CTRL_KEY(k) ((k) & 0x1f) // k & 00011111. mimics CTRL + k in the terminal
 
 
 /*** Data ***/
-struct termios orig_termios; // Global variable to store the original terminal attributes
 
+// --- Editor config contains editor data---//
+struct editorConfig {
+
+    int screenrows; // Number of rows in the terminal window
+    int screencols; // Number of columns in the terminal window
+
+    struct termios orig_termios; // Global variable to store the original terminal attributes
+};
+
+struct editorConfig E;
 
 /*** Terminal ***/
 // --- Print error & exit ---//
@@ -28,7 +38,7 @@ void die (const char *s) {
 
 //--- Disable raw mode ---//
 void disableRawMode() {
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1); // Discards any unread input before applying the changes to the terminal
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1); // Discards any unread input before applying the changes to the terminal
     {
         die("tcsetattr");
     }
@@ -38,10 +48,10 @@ void disableRawMode() {
 void enableRawMode() {
 
     // --- Disable raw mode when exit() is called or returning from main() ---//
-    if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) die("tcgetattr"); // Read current attributes into struct orig_termios
+    if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) die("tcgetattr"); // Read current attributes into struct orig_termios
     atexit(disableRawMode); // atexit() is a function that registers disableRawMode() to be called automatically when the program exits
 
-    struct termios raw = orig_termios; // Assign a copy of the original attributes to raw
+    struct termios raw = &E.orig_termios; // Assign a copy of the original attributes to raw
     raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN); // Modify the local flags in the struct raw. ECHO causes each key typed to be printed to the terminal. ICANON disables canonical mode. ISIG disables Ctrl-C and Ctrl-Z signals. Ctrl-C sends a SIGINT signal to the program, which causes it to terminate, and Ctrl-Z sends a SIGTSTP signal to the program, which causes it to suspend execution. IEXTEN disables Ctrl-V and Ctrl-O signals. Ctrl-V causes the next key you press to be literally inserted into the program input. Ctrl-O restarts output that has been stopped using Ctrl-S
     raw.c_iflag &= ~(IXON | ICRNL | BRKINT | INPCK | ISTRIP); // IXON disables Ctrl-S and Ctrl-Q signals. Ctrl-S stops data from being transmitted to the terminal until Ctrl-Q is pressed. ICRNL disables Ctrl-M, which stands for carriage return, or enter key. When disabled, pressing enter will not translate to a 13 (carriage return) followed by a 10 (line feed). BRKINT disables Ctrl-C and Ctrl-Z signals. INPCK enables parity checking. ISTRIP sets the 8th bit of each input byte to 0.
     raw.c_oflag &= ~(OPOST); // OPOST disables all output processing features. This includes translating '\n' to '\r\n'
@@ -67,13 +77,27 @@ char editorKeyRead() {
     return c;
 }
 
+//----- Get terminal window size ---// 
+int getWindowSize(int *row, int *cols) {
+    struct winsize ws; // ws is a struct that holds the window size
+
+  if (1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) { // ioctl() gets number of rows & columns of the terminal and writes it to the struct ws. TIOCGWINSZ - Terminal Input Output Control Get Window Size
+    if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1; // \x1b[999C moves the cursor to the right by 999 columns. \x1b[999B moves the cursor down by 999 rows. If the cursor is already at the bottom right corner, then it will not move. If the cursor is moved successfully, then we can query the cursor position to get the window size
+        editorKeyRead();
+        return -1; // Return -1 if ioctl() fails
+    } else {
+        *cols = ws.ws_col;
+        *row = ws.ws_row;
+        return 0;
+    }
+}
 
 /*** Output ***/
 
 // --- Draw tildes at the beginning of the line ---//
 void editorDrawRows() {
     int y;
-    for (int y = 0; y < 24; y++) // Since size of the terminal is not known yet, therefore hardcoded 24 rows
+    for (int y = 0; y < E.screenrows; y++) // Since size of the terminal is not known yet, therefore hardcoded 24 rows
     {
         write(STDOUT_FILENO, "~\r\n", 3); // \r is carriage return. \n is line feed. \r\n is a Windows line ending
     }
@@ -113,9 +137,15 @@ void editorProcessKeypress() {
 }
 
 /*** Init ***/
+void initEditor() {
+    if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize"); // Initialize the screen size
+}
+
+
 int main() {
 
     enableRawMode(); // Disabling echo mode
+    initEditor(); // Get the size of the terminal window
 
     while (1)
     {
